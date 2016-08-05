@@ -1,0 +1,172 @@
+---
+title: Predicting training quality.
+output: html_document
+---
+Author: HagenC
+Practical Machine Learcning, Coursera July 31, 2016.
+
+## **Background**
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal  
+activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take   measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks.  
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.  
+In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were   asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here:   http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).  
+
+**Data**
+The training data for this project are available here:  
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv  
+The test data are available here:  
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv  
+
+**Aim of assignment** 
+
+Creat a prediction model that can predict the "class" based on accelerometer measuremnt.
+The "classes"" are:
+- Correct performed: A
+- Incorrect performed: B (throwing), C (half-way), D (lowering only half-way) or E (hips to the front).
+
+
+
+## **Importing data**
+```{r cache= TRUE}
+pml_training_set <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+pml_testing_set <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+training_org <- read.csv(url(pml_training_set), na.strings=c("NA",""))
+testing_org <- read.csv(url(pml_testing_set), na.strings=c("NA",""))
+```
+
+**Dimensions of the data_sets**
+
+```{r}
+dim(training_org)
+dim(testing_org)
+```
+
+## Data Clean-up
+
+**Checking if there is NAs present in the datasets**
+```{r}
+table(is.na(training_org)) 
+table(is.na(testing_org))
+```
+
+**Removing columns with NAs**
+
+```{r}
+NAs_training_org <-data.frame(sapply(training_org, function(x) sum(length(which(is.na(x))))))
+keep_list <- row.names(subset(NAs_training_org, NAs_training_org[,1] == 0)) 
+noNA_training <- subset(training_org, select = c(keep_list))
+```
+
+**Removing non relevant variables. (Ulogical predictors)**
+```{r}
+noNA_training <- noNA_training[, -c(1:7)]
+```
+
+**Cheking if some of the variables/predictors are higly correlated** 
+
+```{r fig.height=8, fig.width=8}
+corMatrix <- cor(noNA_training[, -53])
+library(corrplot)
+corrplot(corMatrix, method = "color", type="lower")
+```
+
+**Removing variables with a correlation above 90%**
+```{r}
+suppressPackageStartupMessages(suppressWarnings(library(caret)))
+corre90_list <- findCorrelation(cor(noNA_training[, -53]), cutoff = 0.9)
+noNA_training_corRemoved <- noNA_training[,-corre90_list]
+```
+
+**The data is now ready for prediction with 46 relevant noncorrelated predictors to work with** 
+
+## Prediction tests.
+
+**Making training(60%) and test(40%) set of the original training set so we can make cross-validation** 
+
+```{r}
+train_split <- createDataPartition(y=noNA_training_corRemoved$classe, p=0.6, list=FALSE)
+training_set <- noNA_training_corRemoved[train_split,]; 
+testing_set <- noNA_training_corRemoved[-train_split,]
+dim(training_set)
+dim(testing_set)
+```
+
+#### **Decision tree (rpart)** 
+
+**Starting with a rpart as it is less computional demanding(fast) compared to other methods**
+
+```{r cache= TRUE}
+set.seed(1375)
+suppressPackageStartupMessages(suppressWarnings(library(rpart)))
+rpart_control <- rpart.control(maxdepth = 4, xval = 10)
+rpartFull <- rpart(classe~., data = training_set, control = rpart_control)
+```
+
+```{r fig.width=8, fig.height=8}
+suppressPackageStartupMessages(suppressWarnings(library(rattle)))
+suppressPackageStartupMessages(suppressWarnings(library(rpart.plot)))
+suppressPackageStartupMessages(suppressWarnings(library(e1071)))
+fancyRpartPlot(rpartFull)
+```
+
+**Out-of-sample prediction: rpart**
+
+```{r}
+pred_rPart <- predict(rpartFull, testing_set, type = "class")
+confusionMatrix(pred_rPart, testing_set$classe)
+```
+
+**Not useful for predicting anything, not really unexpected**   
+**Setting up maxdept to 30 would most likely give better prediction, but it is wayoff a useful accuracy, so no point in testing that**.
+  
+
+### **Trying GBM (Generalized Boosted Regression)**  
+  
+**Computational demanding...coffee time**
+```{r cache=TRUE}
+cvCtrl <- trainControl(method = "repeatedcv", repeats = 1, number = 4)
+suppressPackageStartupMessages(suppressWarnings(trained_GBM <- train(classe ~ ., data = training_set, method = "gbm", trControl = cvCtrl, verbose = FALSE)))
+```
+
+**Out-of-sample prediction: GBM**
+
+```{r}
+pred_trained_rpart <- suppressPackageStartupMessages(suppressWarnings(predict(trained_GBM, testing_set)))
+confusionMatrix(pred_trained_rpart, testing_set$classe)    
+```
+
+**OK Accuracy, even with the reduced trainControl settings**
+
+### **RandomForest metod**
+**Might aswell check if it gives a better accuracy**
+Setting ntree = 200 to speed things up a bit.
+
+```{r cache=TRUE}
+library(randomForest)
+suppressPackageStartupMessages(suppressWarnings(library(AppliedPredictiveModeling)))
+suppressPackageStartupMessages(suppressWarnings(library(randomForest)))
+RF_model <- randomForest(classe ~. , data = training_set)
+```
+
+```{r}
+RF_model
+```
+
+
+**Out-of-sample prediction: RandomForest**  
+```{r}
+pred_RF <- predict(RF_model, testing_set)
+```
+
+```{r}
+confusionMatrix(pred_RF, testing_set$classe)
+```
+
+**RandomForest method wins!**
+
+### **Predicting the classes of the validation set using the randomforest model**.
+```{r}
+valid <- predict(RF_model, testing_org)
+valid
+```

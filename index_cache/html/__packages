@@ -1,0 +1,14 @@
+base
+corrplot
+lattice
+ggplot2
+caret
+rpart
+rattle
+rpart.plot
+e1071
+survival
+gbm
+plyr
+randomForest
+AppliedPredictiveModeling
